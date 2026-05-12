@@ -1,0 +1,12 @@
+{
+  "id": "html-importer",
+  "name": "HTML Importer",
+  "version": "1.0.0",
+  "description": "将 HTML 文件自动转换为 Markdown，支持提取元数据和图片",
+  "author": "Your Name",
+  "authorUrl": "",
+  "isDesktopOnly": false,
+  "minAppVersion": "0.15.0",
+  "js": "main.js",
+  "styles": "styles.css"
+}
