@@ -59,11 +59,15 @@ class HtmlImporterPlugin extends obsidian_1.Plugin {
     cleanFilename(filename) {
         if (!filename)
             return 'untitled';
-        const illegalChars = '<>:"/\\|?*';
-        for (const char of illegalChars) {
-            filename = filename.replace(char, '_');
-        }
-        return filename.trim();
+        const cleaned = String(filename)
+            .replace(/[<>:"/\\|?*]+/g, '_')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/[. ]+$/g, '');
+        return cleaned || 'untitled';
+    }
+    getMarkdownBasename(title) {
+        return this.cleanFilename(title).replace(/\.md$/i, '') || 'untitled';
     }
     extractTitle(htmlContent) {
         const patterns = [
@@ -173,16 +177,16 @@ class HtmlImporterPlugin extends obsidian_1.Plugin {
         }
         return null;
     }
-    extractImages(htmlContent, outputDir, prefix) {
+    async extractImages(htmlContent, outputDir, prefix, relativeDir) {
         const images = [];
         const base64Pattern = /<img[^>]*src=["'](data:image\/[^;]+;base64,[^"']+)["']*>/g;
         let i = 0;
         let match;
+        const safePrefix = this.cleanFilename(prefix).replace(/\.md$/i, '').substring(0, 20) || 'image';
         while ((match = base64Pattern.exec(htmlContent)) !== null) {
             const dataUrl = match[1];
             try {
                 const [header, data] = dataUrl.split(',', 2);
-                const imgData = atob(data);
                 let ext = '.png';
                 if (header.includes('webp'))
                     ext = '.webp';
@@ -190,15 +194,15 @@ class HtmlImporterPlugin extends obsidian_1.Plugin {
                     ext = '.jpg';
                 else if (header.includes('gif'))
                     ext = '.gif';
-                const imgFilename = `${prefix}_${(i + 1).toString().padStart(2, '0')}${ext}`;
+                const imgFilename = `${safePrefix}_${(i + 1).toString().padStart(2, '0')}${ext}`;
                 const imgPath = (0, obsidian_1.normalizePath)(`${outputDir}/${imgFilename}`);
                 const binary = atob(data);
                 const array = new Uint8Array(binary.length);
                 for (let j = 0; j < binary.length; j++) {
                     array[j] = binary.charCodeAt(j);
                 }
-                this.app.vault.createBinary(imgPath, array.buffer);
-                images.push(imgFilename);
+                await this.app.vault.createBinary(imgPath, array.buffer);
+                images.push((0, obsidian_1.normalizePath)(`${relativeDir}/${imgFilename}`));
                 i++;
             }
             catch (e) {
@@ -224,146 +228,79 @@ class HtmlImporterPlugin extends obsidian_1.Plugin {
         if (!content)
             return '';
         const result = [];
-        let imgIndex = 0;
-        const strongPattern = /<(strong|b)[^>]*>(.*?)<\/(strong|b)>/g;
-        const hPattern = /<h([123])[^>]*>(.*?)<\/h[123]>/g;
-        const pPattern = /<p[^>]*>(.*?)<\/p>/g;
-        const liPattern = /<li[^>]*>(.*?)<\/li>/g;
-        const bqPattern = /<blockquote[^>]*>(.*?)<\/blockquote>/g;
-        const sectionPattern = /<section[^>]*>(.*?)<\/section>/g;
-        const spanTextstylePattern = /<span[^>]*textstyle[^>]*>(.*?)<\/span>/g;
-        const spanLeafPattern = /<span[^>]*leaf[^>]*>(.*?)<\/span>/g;
-        const imgSrcPattern = /<img[^>]*src=["'](data:image[^"']+)["']*>/;
-        const imgDataSrcPattern = /<img[^>]*data-src=["']([^"']+)["']*>/;
-        const sections = content.matchAll(sectionPattern);
-        for (const sectionMatch of sections) {
-            const sectionContent = sectionMatch[1];
-            const hMatch = hPattern.exec(sectionContent);
-            if (hMatch) {
-                const level = parseInt(hMatch[1]);
-                let titleText = hMatch[2].replace(strongPattern, '$2');
-                titleText = this.cleanHtml(titleText);
-                if (titleText) {
-                    result.push('#'.repeat(level) + ' ' + titleText);
-                    result.push('');
-                }
+        const imageState = { index: 0 };
+        const pushText = (html, prefix = '') => {
+            let text = html.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
+            text = this.cleanHtml(text);
+            if (text) {
+                result.push(`${prefix}${text}`);
+                result.push('');
             }
-            const textstyleMatches = sectionContent.matchAll(spanTextstylePattern);
-            for (const stMatch of textstyleMatches) {
-                const textContent = stMatch[1];
-                if (imgSrcPattern.test(textContent) || imgDataSrcPattern.test(textContent)) {
-                    if (imgIndex < images.length) {
-                        result.push(`![图片${imgIndex + 1}](images/${images[imgIndex]})`);
+        };
+        const pushImage = (src) => {
+            if (imageState.index < images.length && src.startsWith('data:image')) {
+                result.push(`![图片${imageState.index + 1}](${images[imageState.index]})`);
+                result.push('');
+                imageState.index++;
+            }
+            else if (!src.startsWith('data:image')) {
+                result.push(`![](${src})`);
+                result.push('');
+            }
+        };
+        const pushInline = (html) => {
+            const imgPattern = /<img\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+            let lastIndex = 0;
+            let match;
+            while ((match = imgPattern.exec(html)) !== null) {
+                pushText(html.slice(lastIndex, match.index));
+                pushImage(match[1]);
+                lastIndex = match.index + match[0].length;
+            }
+            pushText(html.slice(lastIndex));
+        };
+        const processBlocks = (html) => {
+            const blockPattern = /<(article|section|ul|ol|h[1-6]|p|li|blockquote)\b[^>]*>([\s\S]*?)<\/\1>|<img\b[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+            let foundBlock = false;
+            let match;
+            while ((match = blockPattern.exec(html)) !== null) {
+                foundBlock = true;
+                if (match[3]) {
+                    pushImage(match[3]);
+                    continue;
+                }
+                const tag = match[1].toLowerCase();
+                const inner = match[2];
+                if (tag === 'article' || tag === 'section' || tag === 'ul' || tag === 'ol') {
+                    processBlocks(inner);
+                }
+                else if (tag.startsWith('h')) {
+                    const heading = this.cleanHtml(inner.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '$2'));
+                    if (heading) {
+                        result.push(`${'#'.repeat(Number(tag.substring(1)))} ${heading}`);
                         result.push('');
-                        imgIndex++;
+                    }
+                }
+                else if (tag === 'li') {
+                    pushText(inner, '- ');
+                }
+                else if (tag === 'blockquote') {
+                    const quote = this.cleanHtml(inner);
+                    if (quote) {
+                        result.push(quote.split('\n').map((line) => `> ${line}`).join('\n'));
+                        result.push('');
                     }
                 }
                 else {
-                    let textClean = textContent.replace(strongPattern, '**$2**');
-                    textClean = this.cleanHtml(textClean);
-                    if (textClean) {
-                        result.push(textClean);
-                        result.push('');
-                    }
+                    pushInline(inner);
                 }
             }
-            if (!spanTextstylePattern.test(sectionContent)) {
-                const leafMatches = sectionContent.matchAll(spanLeafPattern);
-                for (const leafMatch of leafMatches) {
-                    const textContent = leafMatch[1];
-                    if (imgSrcPattern.test(textContent) || imgDataSrcPattern.test(textContent)) {
-                        if (imgIndex < images.length) {
-                            result.push(`![图片${imgIndex + 1}](images/${images[imgIndex]})`);
-                            result.push('');
-                            imgIndex++;
-                        }
-                    }
-                    else {
-                        let textClean = textContent.replace(strongPattern, '**$2**');
-                        textClean = this.cleanHtml(textClean);
-                        if (textClean) {
-                            result.push(textClean);
-                            result.push('');
-                        }
-                    }
-                }
+            if (!foundBlock) {
+                pushInline(html);
             }
-            const pMatches = sectionContent.matchAll(pPattern);
-            for (const pMatch of pMatches) {
-                const pContent = pMatch[1];
-                if (imgSrcPattern.test(pContent) || imgDataSrcPattern.test(pContent)) {
-                    if (imgIndex < images.length) {
-                        result.push(`![图片${imgIndex + 1}](images/${images[imgIndex]})`);
-                        result.push('');
-                        imgIndex++;
-                    }
-                }
-                else {
-                    let pText = pContent.replace(strongPattern, '**$2**');
-                    pText = this.cleanHtml(pText);
-                    if (pText) {
-                        result.push(pText);
-                        result.push('');
-                    }
-                }
-            }
-            const liMatches = sectionContent.matchAll(liPattern);
-            for (const liMatch of liMatches) {
-                let liText = liMatch[1].replace(strongPattern, '**$2**');
-                liText = this.cleanHtml(liText);
-                if (liText) {
-                    result.push(`- ${liText}`);
-                }
-            }
-            const bqMatches = sectionContent.matchAll(bqPattern);
-            for (const bqMatch of bqMatches) {
-                const bqText = this.cleanHtml(bqMatch[1]);
-                if (bqText) {
-                    result.push(`> ${bqText}`);
-                    result.push('');
-                }
-            }
-        }
-        if (result.length === 0) {
-            const pMatches = content.matchAll(pPattern);
-            for (const pMatch of pMatches) {
-                const pContent = pMatch[1];
-                if (imgSrcPattern.test(pContent) || imgDataSrcPattern.test(pContent)) {
-                    if (imgIndex < images.length) {
-                        result.push(`![图片${imgIndex + 1}](images/${images[imgIndex]})`);
-                        result.push('');
-                        imgIndex++;
-                    }
-                }
-                else {
-                    let pText = pContent.replace(strongPattern, '**$2**');
-                    pText = this.cleanHtml(pText);
-                    if (pText) {
-                        result.push(pText);
-                        result.push('');
-                    }
-                }
-            }
-            const hMatches = content.matchAll(hPattern);
-            for (const hMatch of hMatches) {
-                const level = parseInt(hMatch[1]);
-                let titleText = hMatch[2].replace(strongPattern, '$2');
-                titleText = this.cleanHtml(titleText);
-                if (titleText) {
-                    result.push('#'.repeat(level) + ' ' + titleText);
-                    result.push('');
-                }
-            }
-            const liMatches = content.matchAll(liPattern);
-            for (const liMatch of liMatches) {
-                let liText = liMatch[1].replace(strongPattern, '**$2**');
-                liText = this.cleanHtml(liText);
-                if (liText) {
-                    result.push(`- ${liText}`);
-                }
-            }
-        }
-        return result.join('\n');
+        };
+        processBlocks(content);
+        return result.join('\n').trim();
     }
     async convertHtmlToMd(htmlFile) {
         try {
@@ -381,19 +318,23 @@ class HtmlImporterPlugin extends obsidian_1.Plugin {
                 new obsidian_1.Notice('无法确定文件所在文件夹');
                 return;
             }
-            const imageFolderPath = (0, obsidian_1.normalizePath)(`${parent.path}/${this.settings.imageFolder}`);
-            let imageFolder;
-            try {
-                imageFolder = this.app.vault.getAbstractFileByPath(imageFolderPath);
-                if (!imageFolder) {
-                    imageFolder = await this.app.vault.createFolder(imageFolderPath);
+            const markdownBasename = this.getMarkdownBasename(title);
+            const imgPrefix = markdownBasename.substring(0, 20);
+            let images = [];
+            if (this.settings.preserveImages) {
+                const imageFolderName = this.cleanFilename(this.settings.imageFolder || 'images');
+                const imageFolderPath = (0, obsidian_1.normalizePath)(`${parent.path}/${imageFolderName}`);
+                try {
+                    const imageFolder = this.app.vault.getAbstractFileByPath(imageFolderPath);
+                    if (!imageFolder) {
+                        await this.app.vault.createFolder(imageFolderPath);
+                    }
                 }
+                catch {
+                    await this.app.vault.createFolder(imageFolderPath);
+                }
+                images = await this.extractImages(content || htmlContent, imageFolderPath, imgPrefix, imageFolderName);
             }
-            catch {
-                imageFolder = await this.app.vault.createFolder(imageFolderPath);
-            }
-            const imgPrefix = this.cleanFilename(title).substring(0, 20);
-            const images = this.extractImages(content || htmlContent, imageFolderPath, imgPrefix);
             let frontmatter = '';
             if (this.settings.extractMetadata) {
                 frontmatter = `---
@@ -411,8 +352,8 @@ tags: ${tags.join(', ')}
             const mdContent = `${frontmatter}# ${title}
 
 ${this.settings.extractMetadata ? `> **作者：** ${author}\n> **热度：** ${hot || '未知'}\n> **来源：** ${source}\n\n---\n\n` : ''}${this.htmlToMd(content || htmlContent, images)}`;
-            const mdFilename = `${title}.md`;
-            const mdPath = (0, obsidian_1.normalizePath)(`${parent.path}/${this.cleanFilename(mdFilename)}.md`);
+            const mdFilename = `${markdownBasename}.md`;
+            const mdPath = (0, obsidian_1.normalizePath)(`${parent.path}/${mdFilename}`);
             let existingFile = this.app.vault.getAbstractFileByPath(mdPath);
             if (existingFile instanceof obsidian_1.TFile) {
                 await this.app.vault.modify(existingFile, mdContent);

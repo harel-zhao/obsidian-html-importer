@@ -1,134 +1,101 @@
-# HTML Importer - Obsidian 插件
+# HTML Importer for Obsidian
 
-一款将 HTML 文件自动转换为 Markdown 的 Obsidian 插件，支持提取元数据和图片。
+将 HTML 文件转换为 Markdown 的 Obsidian 插件。当前仓库是可直接安装的插件发布形态，`main.js` 是运行入口和当前源码真相。
 
-## 功能特性
+## 功能
 
-- **自动转换**: 创建或导入 HTML 文件时自动转换为 Markdown
-- **元数据提取**: 自动提取标题、作者、日期、热度、来源、标签等信息
-- **图片处理**: 支持提取 base64 内嵌图片和外部图片链接
-- **Frontmatter**: 在 Markdown 文件头部生成 YAML 元数据
-- **批量转换**: 支持右键菜单批量转换文件夹中的 HTML 文件
-- **右键菜单**: 直接在文件右键菜单中转换
+- 自动转换：创建或导入 `.html` 文件时可自动生成 `.md`
+- 手动转换：通过命令面板或文件右键菜单转换单个 HTML 文件
+- 批量转换：递归转换当前目标文件夹中的 HTML 文件
+- 元数据提取：生成 title、author、date、hot、source、url、tags 等 frontmatter
+- 图片处理：可保存 base64 图片到本地，也可关闭本地图片保存
+- 内容转换：按源顺序处理标题、段落、列表、引用、section、直接图片和内联图片
 
-## 安装方法
+## 快速安装
 
-### 方法一：手动安装（推荐）
+1. 克隆或下载本仓库。
+2. 将以下文件复制到 Obsidian vault 的 `.obsidian/plugins/obsidian-html-importer/`：
+   - `manifest.json`
+   - `main.js`
+   - `styles.css`
+3. 打开 Obsidian，进入 `设置 -> 第三方插件`。
+4. 关闭安全模式后启用 `HTML Importer`。
 
-1. 下载本插件文件夹
-2. 将文件夹复制到你的 Obsidian vault 的 `.obsidian/plugins/` 目录下
-3. 重命名文件夹为 `obsidian-html-importer`（如果还不是这个名字）
-4. 打开 Obsidian → 设置 → 社区插件
-5. 找到 "HTML Importer" 并启用
+Windows 插件目录示例：
 
-### 方法二：从源码构建
+```text
+<YourVault>/.obsidian/plugins/obsidian-html-importer/
+```
 
-如果你想从源码构建：
+## 使用方式
+
+- 自动转换：启用插件后，将 `.html` 文件放入 vault。
+- 单文件转换：右键点击 HTML 文件，选择转换为 Markdown。
+- 命令面板：搜索 `HTML Importer` 相关命令。
+- 批量转换：运行批量转换命令，插件会递归查找 HTML 文件。
+
+## 设置项
+
+| 设置 | 默认值 | 说明 |
+| --- | --- | --- |
+| autoConvert | true | 新建 HTML 文件时自动转换 |
+| preserveImages | true | 保存 base64 图片到本地图片文件夹 |
+| imageFolder | images | 图片保存目录名 |
+| extractMetadata | true | 生成 YAML frontmatter |
+
+当 `preserveImages` 为 `false` 时：
+
+- 不创建图片文件夹
+- 不保存 base64 图片
+- 远程图片 URL 保留为 Markdown 图片链接
+- base64-only 图片不会写入 Markdown，避免生成巨大 data URL
+
+## 开发与测试
+
+本项目当前没有 TypeScript 源码和构建步骤。改动以 `main.js` 为准。
 
 ```bash
-# 克隆本仓库
-git clone https://gitee.com/你的用户名/obsidian-html-importer.git
-
-# 进入目录
+git clone https://gitee.com/harel-zhao/obsidian-html-importer.git
 cd obsidian-html-importer
-
-# 安装依赖
-npm install
-
-# 编译 TypeScript
-npm run build
-
-# 将生成的文件复制到 Obsidian 插件目录
-# Windows: %APPDATA%\obsidian\plugins\obsidian-html-importer\
-# macOS: ~/Library/Application Support/obsidian/plugins/obsidian-html-importer/
-# Linux: ~/.config/obsidian/plugins/obsidian-html-importer/
+npm test
+node --check main.js
+node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
 ```
 
-## 使用方法
+测试入口：
 
-### 自动转换
-启用插件后，只需将 HTML 文件放入 vault，插件会自动将其转换为 Markdown。
+- `package.json` 定义 `npm test`
+- `tests/run-tests.js` 使用 Obsidian API mock 验证核心转换逻辑
 
-### 手动转换
-- **右键菜单**: 右键点击 HTML 文件 → "转换为 Markdown"
-- **命令面板**: `Ctrl+P` (Windows) / `Cmd+P` (macOS) → 搜索 "HTML Importer"
-- **批量转换**: 命令面板 → "HTML Importer: 转换文件夹中所有 HTML 文件"
+更多交接信息见：
 
-### 设置选项
-在 Obsidian 设置 → 社区插件 → HTML Importer 中配置：
+- `AGENTS.md` - 给下一位 AI 或开发者的项目规则
+- `docs/DEVELOPMENT.md` - 开发、测试、换机流程
+- `docs/HANDOFF.md` - 当前状态与继续开发清单
+- `docs/CHANGELOG.md` - 重要变更记录
 
-| 选项 | 说明 | 默认值 |
-|------|------|--------|
-| 自动转换 | 开启后导入 HTML 自动转换 | 开启 |
-| 保留图片 | 开启后图片保存到本地 | 开启 |
-| 图片文件夹 | 保存图片的目录名称 | images |
-| 提取元数据 | 生成 YAML frontmatter | 开启 |
+## 仓库结构
 
-## 支持的 HTML 结构
-
-插件支持多种微信公众号文章和常见网页的 HTML 结构：
-
-- `rich_media_content` - 微信公众平台文章
-- `postArticle` - 博客文章
-- `article-content` / `post-content` / `entry-content` - 通用文章内容
-- `<article>` 标签
-- `<section>` 标签
-
-## 提取的元数据
-
-| 字段 | 说明 |
-|------|------|
-| title | 文章标题 |
-| author | 作者 |
-| date | 发布日期 |
-| hot | 热度/阅读量 |
-| source | 来源网站 |
-| url | 原始链接 |
-| tags | 标签 |
-
-## 转换示例
-
-### 输入 HTML
-```html
-<article>
-    <h1>文章标题</h1>
-    <p>这是<strong>加粗</strong>文字</p>
-</article>
-```
-
-### 输出 Markdown
-```markdown
----
-title: 文章标题
-author: 未知
-date:
-hot:
-source: 未知
-url:
-tags:
----
-
-# 文章标题
-
-这是**加粗**文字
-```
-
-## 文件结构
-
-```
+```text
 obsidian-html-importer/
-├── manifest.json      # 插件清单
-├── main.js           # 编译后的入口文件
-├── styles.css        # 样式文件
-└── README.md         # 说明文档
+  manifest.json
+  main.js
+  styles.css
+  package.json
+  tests/run-tests.js
+  docs/
+    DEVELOPMENT.md
+    HANDOFF.md
+    CHANGELOG.md
+    superpowers/specs/
 ```
 
-## 技术栈
+## 当前注意事项
 
-- TypeScript
-- Obsidian API
-- 正则表达式解析 HTML
+- `main.js` 是当前维护入口，不要假设存在 `src/`、`tsconfig.json` 或构建产物。
+- `.gitignore` 仍忽略 `src/` 和 `tsconfig.json`，如果未来迁移 TypeScript，需要同步调整。
+- 正则解析 HTML 有边界，新增转换能力前必须补 `tests/run-tests.js` 回归用例。
 
-## 许可证
+## License
 
-MIT License
+MIT
